@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Users, HardHat, MapPin, Search, Briefcase, Plus, Hammer, Zap, PenTool, X, ShieldAlert, Calendar, CheckCircle, AlertTriangle, Loader2 } from 'lucide-react';
+import { Users, HardHat, MapPin, Search, Briefcase, Plus, Hammer, Zap, PenTool, X, ShieldAlert, Calendar, CheckCircle, AlertTriangle, Loader2, Edit2 } from 'lucide-react';
 import { initializeApp } from 'firebase/app';
 import { 
   getFirestore, collection, onSnapshot, addDoc, updateDoc, 
@@ -84,10 +84,13 @@ export default function App() {
   const [filterRole, setFilterRole] = useState("Todos");
   const [draggedWorkerId, setDraggedWorkerId] = useState(null);
   const [isDraggingOver, setIsDraggingOver] = useState(null);
+  
+  // Controle do Modal de Edição/Criação
   const [showModal, setShowModal] = useState(false);
+  const [editingSiteId, setEditingSiteId] = useState(null); // ID da obra sendo editada (null se for criação)
   const [siteToComplete, setSiteToComplete] = useState(null);
   
-  const [newSiteData, setNewSiteData] = useState({ 
+  const [siteFormData, setSiteFormData] = useState({ 
     name: '', address: '', status: 'Em andamento', startDate: '', endDate: '' 
   });
 
@@ -187,15 +190,49 @@ export default function App() {
     }
   };
 
-  const handleAddSite = async (e) => {
+  // Abrir Modal de CRIAÇÃO
+  const openNewSiteModal = () => {
+    setEditingSiteId(null);
+    setSiteFormData({ name: '', address: '', status: 'Em andamento', startDate: '', endDate: '' });
+    setShowModal(true);
+  };
+
+  // Abrir Modal de EDIÇÃO
+  const openEditSiteModal = (site) => {
+    setEditingSiteId(site.id);
+    setSiteFormData({ 
+      name: site.name, 
+      address: site.address, 
+      status: site.status, 
+      startDate: site.startDate, 
+      endDate: site.endDate 
+    });
+    setShowModal(true);
+  };
+
+  // Salvar Obra (Criação ou Edição)
+  const handleSaveSite = async (e) => {
     e.preventDefault();
-    if (!newSiteData.name || !user) return;
+    if (!siteFormData.name || !user) return;
+    
     try {
-      await addDoc(collection(db, SITES_COLLECTION), {
-        ...newSiteData,
-        createdAt: new Date().toISOString()
-      });
-      setNewSiteData({ name: '', address: '', status: 'Em andamento', startDate: '', endDate: '' });
+      if (editingSiteId) {
+        // Modo Edição: Atualizar existente
+        const siteRef = doc(db, SITES_COLLECTION, editingSiteId);
+        await updateDoc(siteRef, {
+          name: siteFormData.name,
+          address: siteFormData.address,
+          status: siteFormData.status,
+          startDate: siteFormData.startDate,
+          endDate: siteFormData.endDate
+        });
+      } else {
+        // Modo Criação: Adicionar novo
+        await addDoc(collection(db, SITES_COLLECTION), {
+          ...siteFormData,
+          createdAt: new Date().toISOString()
+        });
+      }
       setShowModal(false);
     } catch(e) { console.error(e); }
   };
@@ -270,7 +307,7 @@ export default function App() {
           </div>
         </div>
         <div className="flex flex-col md:flex-row items-center gap-3 w-full md:w-auto">
-          <button onClick={() => setShowModal(true)} className="flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors shadow-sm w-full md:w-auto"><Plus size={16} /><span>Nova Obra</span></button>
+          <button onClick={openNewSiteModal} className="flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors shadow-sm w-full md:w-auto"><Plus size={16} /><span>Nova Obra</span></button>
           <div className="relative w-full md:w-auto">
             <select value={filterRole} onChange={(e) => setFilterRole(e.target.value)} className="w-full md:w-64 pl-9 pr-4 py-2 bg-gray-100 border-none rounded-lg text-sm font-medium text-gray-700 focus:ring-2 focus:ring-blue-500 outline-none cursor-pointer hover:bg-gray-200 transition-colors">
               {ROLES.map(r => <option key={r} value={r}>{r}</option>)}
@@ -297,7 +334,7 @@ export default function App() {
                <div className="h-full flex flex-col items-center justify-center text-gray-400 border-2 border-dashed border-gray-200 rounded-xl bg-gray-50/50 p-8">
                  <div className="bg-white p-4 rounded-full shadow-sm mb-4"><HardHat size={48} className="text-blue-200" /></div>
                  <h3 className="text-lg font-bold text-gray-600 mb-2">Nenhuma obra ativa</h3>
-                 <button onClick={() => setShowModal(true)} className="flex items-center gap-2 px-5 py-2.5 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors shadow-sm"><Plus size={18} /> Cadastrar Obra</button>
+                 <button onClick={openNewSiteModal} className="flex items-center gap-2 px-5 py-2.5 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors shadow-sm"><Plus size={18} /> Cadastrar Obra</button>
                </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 h-full">
@@ -308,9 +345,16 @@ export default function App() {
                     <div key={site.id} className="flex flex-col h-full max-h-[calc(100vh-140px)]">
                       <div className="bg-white p-4 rounded-t-xl border border-gray-200 border-b-0 shadow-sm relative overflow-hidden">
                         <div className={`absolute top-0 left-0 w-1 h-full ${getStatusBarColor(site.status)}`}></div>
-                        <div className="flex justify-between items-start mb-1 pl-2">
-                            <h3 className="font-bold text-gray-800 text-lg truncate">{site.name}</h3>
-                            <button onClick={() => handleStatusClick(site)} className={`text-[10px] uppercase font-bold px-2 py-0.5 rounded-full border cursor-pointer hover:opacity-80 transition-opacity select-none ${getStatusColor(site.status)}`}>{site.status}</button>
+                        <div className="flex justify-between items-start mb-1 pl-2 gap-2">
+                            <h3 
+                              onClick={() => openEditSiteModal(site)}
+                              className="font-bold text-gray-800 text-lg truncate cursor-pointer hover:text-blue-600 hover:underline flex items-center gap-2 group transition-colors flex-1 min-w-0"
+                              title="Clique para editar informações da obra"
+                            >
+                              {site.name}
+                              <Edit2 size={12} className="text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0" />
+                            </h3>
+                            <button onClick={() => handleStatusClick(site)} className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full border cursor-pointer hover:opacity-80 transition-opacity select-none flex-shrink-0 whitespace-nowrap ${getStatusColor(site.status)}`}>{site.status}</button>
                         </div>
                         <div className="flex items-center gap-1 text-gray-500 text-xs pl-2"><MapPin size={12} />{site.address}</div>
                         <div className="flex items-center gap-1 text-gray-500 text-xs pl-2 mt-1"><Calendar size={12} /><span className="font-medium text-gray-600">{formatDate(site.startDate)} - {formatDate(site.endDate)}</span></div>
@@ -334,15 +378,27 @@ export default function App() {
       {showModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4 transition-opacity">
           <div className="bg-white rounded-xl shadow-xl w-full max-w-md overflow-hidden animate-fade-in">
-            <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50"><h3 className="font-bold text-gray-800">Nova Obra</h3><button onClick={() => setShowModal(false)} className="text-gray-400 hover:text-gray-600"><X size={20} /></button></div>
-            <form onSubmit={handleAddSite} className="p-6 space-y-4">
-              <div><label className="block text-sm font-medium text-gray-700 mb-1">Nome</label><input type="text" required value={newSiteData.name} onChange={e => setNewSiteData({...newSiteData, name: e.target.value})} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" /></div>
-              <div><label className="block text-sm font-medium text-gray-700 mb-1">Endereço</label><input type="text" required value={newSiteData.address} onChange={e => setNewSiteData({...newSiteData, address: e.target.value})} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" /></div>
+            <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
+              <h3 className="font-bold text-gray-800">{editingSiteId ? "Editar Obra" : "Nova Obra"}</h3>
+              <button onClick={() => setShowModal(false)} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
+            </div>
+            <form onSubmit={handleSaveSite} className="p-6 space-y-4">
+              <div><label className="block text-sm font-medium text-gray-700 mb-1">Nome</label><input type="text" required value={siteFormData.name} onChange={e => setSiteFormData({...siteFormData, name: e.target.value})} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" /></div>
+              <div><label className="block text-sm font-medium text-gray-700 mb-1">Endereço</label><input type="text" required value={siteFormData.address} onChange={e => setSiteFormData({...siteFormData, address: e.target.value})} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" /></div>
               <div className="grid grid-cols-2 gap-4">
-                <div><label className="block text-sm font-medium text-gray-700 mb-1">Início</label><input type="date" required value={newSiteData.startDate} onChange={e => setNewSiteData({...newSiteData, startDate: e.target.value})} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" /></div>
-                <div><label className="block text-sm font-medium text-gray-700 mb-1">Término</label><input type="date" required value={newSiteData.endDate} onChange={e => setNewSiteData({...newSiteData, endDate: e.target.value})} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" /></div>
+                <div><label className="block text-sm font-medium text-gray-700 mb-1">Início</label><input type="date" required value={siteFormData.startDate} onChange={e => setSiteFormData({...siteFormData, startDate: e.target.value})} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" /></div>
+                <div><label className="block text-sm font-medium text-gray-700 mb-1">Término</label><input type="date" required value={siteFormData.endDate} onChange={e => setSiteFormData({...siteFormData, endDate: e.target.value})} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" /></div>
               </div>
-              <div className="flex gap-3 pt-2"><button type="button" onClick={() => setShowModal(false)} className="flex-1 px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors">Cancelar</button><button type="submit" className="flex-1 px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors shadow-sm">Criar</button></div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
+                <select value={siteFormData.status} onChange={e => setSiteFormData({...siteFormData, status: e.target.value})} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none">
+                   {STATUS_OPTIONS.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                </select>
+              </div>
+              <div className="flex gap-3 pt-2">
+                <button type="button" onClick={() => setShowModal(false)} className="flex-1 px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors">Cancelar</button>
+                <button type="submit" className="flex-1 px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors shadow-sm">{editingSiteId ? "Salvar Alterações" : "Criar Obra"}</button>
+              </div>
             </form>
           </div>
         </div>
