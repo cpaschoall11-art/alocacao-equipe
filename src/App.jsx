@@ -1,36 +1,61 @@
-import React, { useState, useMemo } from 'react';
-import { Users, HardHat, MapPin, Search, Briefcase, Plus, Hammer, Zap, PenTool, X, ShieldAlert, Calendar, CheckCircle, AlertTriangle } from 'lucide-react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Users, HardHat, MapPin, Search, Briefcase, Plus, Hammer, Zap, PenTool, X, ShieldAlert, Calendar, CheckCircle, AlertTriangle, Loader2 } from 'lucide-react';
+import { initializeApp } from 'firebase/app';
+import { 
+  getFirestore, collection, onSnapshot, addDoc, updateDoc, 
+  deleteDoc, doc, writeBatch, query, orderBy 
+} from 'firebase/firestore';
+import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 
-// Dados importados da lista fornecida
-const INITIAL_WORKERS = [
-  { id: 1, name: "Adauto Florencio de Araujo", role: "Montador Pleno", color: "bg-blue-100 text-blue-800", siteId: null },
-  { id: 2, name: "Ailton dos Reis de Jesus", role: "Soldador Senior", color: "bg-orange-100 text-orange-800", siteId: null },
-  { id: 3, name: "Airton Soares Lima", role: "Montador Pleno", color: "bg-blue-100 text-blue-800", siteId: null },
-  { id: 4, name: "Cicero Lopes da Silva", role: "Montador Junior", color: "bg-cyan-100 text-cyan-800", siteId: null },
-  { id: 5, name: "Cleoney Alves Coutinho", role: "Montador Pleno", color: "bg-blue-100 text-blue-800", siteId: null },
-  { id: 6, name: "Deilson Floriano Monteiro", role: "Montador Senior", color: "bg-indigo-100 text-indigo-800", siteId: null },
-  { id: 7, name: "Edinaldo Domingos da Silva", role: "Montador Junior", color: "bg-cyan-100 text-cyan-800", siteId: null },
-  { id: 8, name: "Edvaldo Valentim Moura", role: "Montador Junior", color: "bg-cyan-100 text-cyan-800", siteId: null },
-  { id: 9, name: "Elton Soares Lima", role: "Montador Pleno", color: "bg-blue-100 text-blue-800", siteId: null },
-  { id: 10, name: "Erivelton Ferreira da Silva", role: "Montador Junior", color: "bg-cyan-100 text-cyan-800", siteId: null },
-  { id: 11, name: "Francisco Rezende Filho", role: "Supervisor de Obras", color: "bg-purple-100 text-purple-800", siteId: null },
-  { id: 12, name: "Gabriel Henrique Candido da Silva", role: "Ajudante Montador", color: "bg-gray-100 text-gray-800", siteId: null },
-  { id: 13, name: "Gilmario Cerqueira de Oliveira", role: "Montador Junior", color: "bg-cyan-100 text-cyan-800", siteId: null },
-  { id: 14, name: "João Batista da Silva Pereira", role: "Montador Junior", color: "bg-cyan-100 text-cyan-800", siteId: null },
-  { id: 15, name: "José Carlos da Silva", role: "Montador Junior", color: "bg-cyan-100 text-cyan-800", siteId: null },
-  { id: 16, name: "José Roberto Simão da Silva", role: "Montador Junior", color: "bg-cyan-100 text-cyan-800", siteId: null },
-  { id: 17, name: "Josemario Jesus de Oliveira", role: "Montador Pleno", color: "bg-blue-100 text-blue-800", siteId: null },
-  { id: 18, name: "Leonardo G Soares", role: "Técnico de Segurança", color: "bg-yellow-100 text-yellow-800", siteId: null },
-  { id: 19, name: "Lucas Silva Messias", role: "Montador Junior", color: "bg-cyan-100 text-cyan-800", siteId: null },
-  { id: 20, name: "Michel Vitorino Almeida Souza", role: "Ajudante Montador", color: "bg-gray-100 text-gray-800", siteId: null },
-  { id: 21, name: "Robson Lopes Santos", role: "Ajudante Montador", color: "bg-gray-100 text-gray-800", siteId: null },
-  { id: 22, name: "Valdir Gonçalves de Queiroz", role: "Soldador Senior", color: "bg-orange-100 text-orange-800", siteId: null },
-  { id: 23, name: "Valney Santana dos Santos", role: "Montador Junior", color: "bg-cyan-100 text-cyan-800", siteId: null },
-  { id: 24, name: "William Alves de Novaes", role: "Técnico de Segurança", color: "bg-yellow-100 text-yellow-800", siteId: null },
+// ==================================================================================
+// CONFIGURAÇÃO DO FIREBASE
+// Copie as chaves do seu console do Firebase e cole abaixo
+// ==================================================================================
+const firebaseConfig = {
+  apiKey: "AIzaSyBkJIOfHTyhz1oiaLPEER9G9xDUVJImles",
+  authDomain: "alocacao-de-obras.firebaseapp.com",
+  projectId: "alocacao-de-obras",
+  storageBucket: "alocacao-de-obras.firebasestorage.app",
+  messagingSenderId: "942526225092",
+  appId: "1:942526225092:web:8ec0d6aa03edca8bb04791"
+};
+
+// Inicialização (Verificação de segurança simples para não quebrar se não tiver config)
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+
+// Coleções no Firestore
+const WORKERS_COLLECTION = 'workers';
+const SITES_COLLECTION = 'sites';
+
+// --- DADOS INICIAIS (Apenas para carregar na primeira vez no banco) ---
+const INITIAL_WORKERS_SEED = [
+  { name: "Adauto Florencio de Araujo", role: "Montador Pleno", color: "bg-blue-100 text-blue-800", siteId: null },
+  { name: "Ailton dos Reis de Jesus", role: "Soldador Senior", color: "bg-orange-100 text-orange-800", siteId: null },
+  { name: "Airton Soares Lima", role: "Montador Pleno", color: "bg-blue-100 text-blue-800", siteId: null },
+  { name: "Cicero Lopes da Silva", role: "Montador Junior", color: "bg-cyan-100 text-cyan-800", siteId: null },
+  { name: "Cleoney Alves Coutinho", role: "Montador Pleno", color: "bg-blue-100 text-blue-800", siteId: null },
+  { name: "Deilson Floriano Monteiro", role: "Montador Senior", color: "bg-indigo-100 text-indigo-800", siteId: null },
+  { name: "Edinaldo Domingos da Silva", role: "Montador Junior", color: "bg-cyan-100 text-cyan-800", siteId: null },
+  { name: "Edvaldo Valentim Moura", role: "Montador Junior", color: "bg-cyan-100 text-cyan-800", siteId: null },
+  { name: "Elton Soares Lima", role: "Montador Pleno", color: "bg-blue-100 text-blue-800", siteId: null },
+  { name: "Erivelton Ferreira da Silva", role: "Montador Junior", color: "bg-cyan-100 text-cyan-800", siteId: null },
+  { name: "Francisco Rezende Filho", role: "Supervisor de Obras", color: "bg-purple-100 text-purple-800", siteId: null },
+  { name: "Gabriel Henrique Candido da Silva", role: "Ajudante Montador", color: "bg-gray-100 text-gray-800", siteId: null },
+  { name: "Gilmario Cerqueira de Oliveira", role: "Montador Junior", color: "bg-cyan-100 text-cyan-800", siteId: null },
+  { name: "João Batista da Silva Pereira", role: "Montador Junior", color: "bg-cyan-100 text-cyan-800", siteId: null },
+  { name: "José Carlos da Silva", role: "Montador Junior", color: "bg-cyan-100 text-cyan-800", siteId: null },
+  { name: "José Roberto Simão da Silva", role: "Montador Junior", color: "bg-cyan-100 text-cyan-800", siteId: null },
+  { name: "Josemario Jesus de Oliveira", role: "Montador Pleno", color: "bg-blue-100 text-blue-800", siteId: null },
+  { name: "Leonardo G Soares", role: "Técnico de Segurança", color: "bg-yellow-100 text-yellow-800", siteId: null },
+  { name: "Lucas Silva Messias", role: "Montador Junior", color: "bg-cyan-100 text-cyan-800", siteId: null },
+  { name: "Michel Vitorino Almeida Souza", role: "Ajudante Montador", color: "bg-gray-100 text-gray-800", siteId: null },
+  { name: "Robson Lopes Santos", role: "Ajudante Montador", color: "bg-gray-100 text-gray-800", siteId: null },
+  { name: "Valdir Gonçalves de Queiroz", role: "Soldador Senior", color: "bg-orange-100 text-orange-800", siteId: null },
+  { name: "Valney Santana dos Santos", role: "Montador Junior", color: "bg-cyan-100 text-cyan-800", siteId: null },
+  { name: "William Alves de Novaes", role: "Técnico de Segurança", color: "bg-yellow-100 text-yellow-800", siteId: null },
 ];
-
-// Lista de obras inicia vazia conforme solicitado
-const INITIAL_SITES = [];
 
 const ROLES = [
   "Todos", 
@@ -46,13 +71,16 @@ const ROLES = [
 const STATUS_OPTIONS = ["Em planejamento", "Em andamento", "Paralisada"];
 
 export default function App() {
-  const [workers, setWorkers] = useState(INITIAL_WORKERS);
-  const [sites, setSites] = useState(INITIAL_SITES);
+  const [user, setUser] = useState(null);
+  const [workers, setWorkers] = useState([]);
+  const [sites, setSites] = useState([]);
+  const [loading, setLoading] = useState(true);
+  
   const [filterRole, setFilterRole] = useState("Todos");
   const [draggedWorkerId, setDraggedWorkerId] = useState(null);
-  const [isDraggingOver, setIsDraggingOver] = useState(null); // armazena o ID da zona onde está passando
+  const [isDraggingOver, setIsDraggingOver] = useState(null);
   const [showModal, setShowModal] = useState(false);
-  const [siteToComplete, setSiteToComplete] = useState(null); // Estado para armazenar obra sendo concluída
+  const [siteToComplete, setSiteToComplete] = useState(null);
   
   const [newSiteData, setNewSiteData] = useState({ 
     name: '', 
@@ -62,83 +90,141 @@ export default function App() {
     endDate: ''
   });
 
-  // Lógica de Drag and Drop
+  // 1. Autenticação Simples (Anônima)
+  useEffect(() => {
+    signInAnonymously(auth).catch((error) => {
+      console.error("Erro na autenticação:", error);
+    });
+    return onAuthStateChanged(auth, (u) => setUser(u));
+  }, []);
+
+  // 2. Sincronização de Dados (Workers e Sites)
+  useEffect(() => {
+    if (!user) return;
+
+    // Referências das coleções (Na raiz do Firestore)
+    const workersRef = collection(db, WORKERS_COLLECTION);
+    const sitesRef = collection(db, SITES_COLLECTION);
+
+    // Listener de Workers
+    const unsubWorkers = onSnapshot(query(workersRef, orderBy('name')), (snapshot) => {
+      const loadedWorkers = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      
+      // Seeding: Se a lista estiver vazia no banco, carregar a inicial
+      if (loadedWorkers.length === 0 && !snapshot.metadata.fromCache) {
+        console.log("Banco vazio. Criando dados iniciais...");
+        const batch = writeBatch(db);
+        INITIAL_WORKERS_SEED.forEach(w => {
+           const newDocRef = doc(workersRef);
+           batch.set(newDocRef, w);
+        });
+        batch.commit().catch(console.error);
+      } else {
+        setWorkers(loadedWorkers);
+      }
+      setLoading(false);
+    }, (error) => console.error("Erro ao carregar workers:", error));
+
+    // Listener de Sites
+    const unsubSites = onSnapshot(query(sitesRef, orderBy('name')), (snapshot) => {
+      const loadedSites = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setSites(loadedSites);
+    }, (error) => console.error("Erro ao carregar sites:", error));
+
+    return () => {
+      unsubWorkers();
+      unsubSites();
+    };
+  }, [user]);
+
+  // --- Ações no Banco de Dados ---
+
   const handleDragStart = (e, workerId) => {
     setDraggedWorkerId(workerId);
     e.dataTransfer.effectAllowed = "move";
   };
 
   const handleDragOver = (e, zoneId) => {
-    e.preventDefault(); // Necessário para permitir o drop
+    e.preventDefault();
     setIsDraggingOver(zoneId);
   };
 
-  const handleDragLeave = () => {
-    setIsDraggingOver(null);
-  };
-
-  const handleDrop = (e, targetSiteId) => {
+  const handleDrop = async (e, targetSiteId) => {
     e.preventDefault();
     setIsDraggingOver(null);
     
-    if (draggedWorkerId !== null) {
-      setWorkers((prev) => 
-        prev.map((w) => 
-          w.id === draggedWorkerId ? { ...w, siteId: targetSiteId } : w
-        )
-      );
+    if (draggedWorkerId && user) {
+      try {
+        const workerRef = doc(db, WORKERS_COLLECTION, draggedWorkerId);
+        await updateDoc(workerRef, { siteId: targetSiteId });
+      } catch (error) {
+        console.error("Erro ao mover funcionário:", error);
+      }
       setDraggedWorkerId(null);
     }
   };
 
-  // Adicionar nova obra
-  const handleAddSite = (e) => {
+  const handleAddSite = async (e) => {
     e.preventDefault();
-    if (!newSiteData.name || !newSiteData.address) return;
+    if (!newSiteData.name || !newSiteData.address || !user) return;
 
-    const newSite = {
-      id: `site-${Date.now()}`,
-      name: newSiteData.name,
-      address: newSiteData.address,
-      status: newSiteData.status,
-      startDate: newSiteData.startDate,
-      endDate: newSiteData.endDate
-    };
-
-    setSites([...sites, newSite]);
-    setNewSiteData({ name: '', address: '', status: 'Em andamento', startDate: '', endDate: '' });
-    setShowModal(false);
-  };
-
-  // Concluir Obra
-  const handleCompleteSite = () => {
-    if (siteToComplete) {
-      // 1. Remover a obra da lista
-      setSites(prev => prev.filter(s => s.id !== siteToComplete.id));
+    try {
+      await addDoc(collection(db, SITES_COLLECTION), {
+        name: newSiteData.name,
+        address: newSiteData.address,
+        status: newSiteData.status,
+        startDate: newSiteData.startDate,
+        endDate: newSiteData.endDate,
+        createdAt: new Date().toISOString()
+      });
       
-      // 2. Liberar os funcionários (siteId = null)
-      setWorkers(prev => prev.map(w => 
-        w.siteId === siteToComplete.id ? { ...w, siteId: null } : w
-      ));
-
-      // 3. Fechar modal
-      setSiteToComplete(null);
+      setNewSiteData({ name: '', address: '', status: 'Em andamento', startDate: '', endDate: '' });
+      setShowModal(false);
+    } catch (error) {
+      console.error("Erro ao criar obra:", error);
     }
   };
 
-  // Alterar Status da Obra ao clicar
-  const handleStatusClick = (siteId) => {
-    setSites(prevSites => prevSites.map(site => {
-      if (site.id === siteId) {
-        const currentIndex = STATUS_OPTIONS.indexOf(site.status);
-        const nextIndex = (currentIndex + 1) % STATUS_OPTIONS.length;
-        return { ...site, status: STATUS_OPTIONS[nextIndex] };
-      }
-      return site;
-    }));
+  const handleStatusClick = async (site) => {
+    if (!user) return;
+    const currentIndex = STATUS_OPTIONS.indexOf(site.status);
+    const nextIndex = (currentIndex + 1) % STATUS_OPTIONS.length;
+    const newStatus = STATUS_OPTIONS[nextIndex];
+
+    try {
+      const siteRef = doc(db, SITES_COLLECTION, site.id);
+      await updateDoc(siteRef, { status: newStatus });
+    } catch (error) {
+      console.error("Erro ao atualizar status:", error);
+    }
   };
 
-  // Cores do Status
+  const handleCompleteSite = async () => {
+    if (siteToComplete && user) {
+      const batch = writeBatch(db);
+      
+      // 1. Deletar a obra
+      const siteRef = doc(db, SITES_COLLECTION, siteToComplete.id);
+      batch.delete(siteRef);
+
+      // 2. Liberar funcionários (buscar quem está nela)
+      const workersInSite = workers.filter(w => w.siteId === siteToComplete.id);
+      workersInSite.forEach(w => {
+        const workerRef = doc(db, WORKERS_COLLECTION, w.id);
+        batch.update(workerRef, { siteId: null });
+      });
+
+      try {
+        await batch.commit();
+        setSiteToComplete(null);
+      } catch (error) {
+        console.error("Erro ao concluir obra:", error);
+      }
+    }
+  };
+
+  // --- UI Helpers ---
+
   const getStatusColor = (status) => {
     switch (status) {
       case 'Paralisada': return 'bg-red-50 text-red-600 border-red-100';
@@ -148,7 +234,6 @@ export default function App() {
     }
   };
 
-  // Cor da barra lateral do status
   const getStatusBarColor = (status) => {
     switch (status) {
       case 'Paralisada': return 'bg-red-500';
@@ -158,28 +243,30 @@ export default function App() {
     }
   };
 
-  // Formatar data para exibição
   const formatDate = (dateString) => {
     if (!dateString) return '--/--/----';
     const date = new Date(dateString);
-    // Ajuste simples para fuso horário local
     return new Date(date.valueOf() + date.getTimezoneOffset() * 60000).toLocaleDateString('pt-BR');
   };
 
-  // Componente do Card de Trabalhador
+  const filteredWorkers = useMemo(() => {
+    return workers.filter(w => filterRole === "Todos" || w.role === filterRole);
+  }, [workers, filterRole]);
+
+  const unassignedWorkers = filteredWorkers.filter(w => w.siteId === null);
+
   const WorkerCard = ({ worker }) => {
     const isDragging = draggedWorkerId === worker.id;
-    
     return (
       <div
         draggable
         onDragStart={(e) => handleDragStart(e, worker.id)}
         className={`
-          flex items-center gap-3 p-3 mb-2 bg-white rounded-lg shadow-sm border border-gray-200 cursor-grab active:cursor-grabbing hover:shadow-md transition-all
+          flex items-center gap-3 p-3 mb-2 bg-white rounded-lg shadow-sm border border-gray-200 cursor-grab active:cursor-grabbing hover:shadow-md transition-all select-none
           ${isDragging ? 'opacity-50 ring-2 ring-blue-400' : ''}
         `}
       >
-        <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs flex-shrink-0 ${worker.color}`}>
+        <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs flex-shrink-0 ${worker.color || 'bg-gray-100 text-gray-800'}`}>
           {worker.name.charAt(0)}
         </div>
         <div className="flex-1 min-w-0">
@@ -192,14 +279,18 @@ export default function App() {
     );
   };
 
-  // Filtragem
-  const filteredWorkers = useMemo(() => {
-    return workers.filter(w => filterRole === "Todos" || w.role === filterRole);
-  }, [workers, filterRole]);
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="text-center">
+          <Loader2 className="w-10 h-10 animate-spin text-blue-600 mx-auto mb-2" />
+          <p className="text-gray-500">Conectando ao banco de dados...</p>
+          <p className="text-xs text-gray-400 mt-2 max-w-xs mx-auto">Se demorar, verifique se colou as chaves do Firebase corretamente.</p>
+        </div>
+      </div>
+    );
+  }
 
-  // Contadores
-  const unassignedWorkers = filteredWorkers.filter(w => w.siteId === null);
-  
   return (
     <div className="min-h-screen bg-gray-50 font-sans flex flex-col">
       {/* Header */}
@@ -210,6 +301,13 @@ export default function App() {
           </div>
           <div>
             <h1 className="text-xl font-bold text-gray-800">Alocação de Equipes</h1>
+            <div className="flex items-center gap-2 text-xs text-green-600 mt-1">
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
+              </span>
+              Online e Sincronizado
+            </div>
           </div>
         </div>
 
@@ -239,7 +337,7 @@ export default function App() {
       <main className="flex-1 overflow-x-auto p-6">
         <div className="flex flex-col md:flex-row gap-6 min-w-max md:min-w-0 h-full">
           
-          {/* Coluna: Disponíveis (Unassigned) */}
+          {/* Coluna: Disponíveis */}
           <div className="flex flex-col w-full md:w-64 flex-shrink-0 max-h-[calc(100vh-140px)]">
             <div className="flex items-center justify-between mb-3 px-1">
               <h2 className="font-bold text-gray-700 flex items-center gap-2">
@@ -253,7 +351,6 @@ export default function App() {
 
             <div 
               onDragOver={(e) => handleDragOver(e, 'unassigned')}
-              onDragLeave={handleDragLeave}
               onDrop={(e) => handleDrop(e, null)}
               className={`
                 flex-1 bg-gray-100 rounded-xl p-3 border-2 border-dashed transition-colors overflow-y-auto
@@ -273,15 +370,15 @@ export default function App() {
             </div>
           </div>
 
-          {/* Área das Obras (Grid) */}
+          {/* Área das Obras */}
           <div className="flex-1">
             {sites.length === 0 ? (
                <div className="h-full flex flex-col items-center justify-center text-gray-400 border-2 border-dashed border-gray-200 rounded-xl bg-gray-50/50 p-8">
                  <div className="bg-white p-4 rounded-full shadow-sm mb-4">
                    <HardHat size={48} className="text-blue-200" />
                  </div>
-                 <h3 className="text-lg font-bold text-gray-600 mb-2">Nenhuma obra cadastrada</h3>
-                 <p className="text-sm text-gray-500 mb-6 text-center max-w-xs">Comece clicando em "Nova Obra" para adicionar os locais de trabalho da sua equipe.</p>
+                 <h3 className="text-lg font-bold text-gray-600 mb-2">Nenhuma obra ativa</h3>
+                 <p className="text-sm text-gray-500 mb-6 text-center max-w-xs">Comece clicando em "Nova Obra" para adicionar os locais de trabalho.</p>
                  <button
                     onClick={() => setShowModal(true)}
                     className="flex items-center gap-2 px-5 py-2.5 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors shadow-sm"
@@ -304,7 +401,7 @@ export default function App() {
                         <div className="flex justify-between items-start mb-1 pl-2">
                             <h3 className="font-bold text-gray-800 text-lg truncate">{site.name}</h3>
                             <button 
-                              onClick={() => handleStatusClick(site.id)}
+                              onClick={() => handleStatusClick(site)}
                               className={`text-[10px] uppercase font-bold px-2 py-0.5 rounded-full border cursor-pointer hover:opacity-80 transition-opacity select-none ${getStatusColor(site.status)}`}
                               title="Clique para alterar o status"
                             >
@@ -323,10 +420,9 @@ export default function App() {
                         </div>
                       </div>
 
-                      {/* Drop Zone da Obra */}
+                      {/* Drop Zone */}
                       <div 
                         onDragOver={(e) => handleDragOver(e, site.id)}
-                        onDragLeave={handleDragLeave}
                         onDrop={(e) => handleDrop(e, site.id)}
                         className={`
                           flex-1 bg-white border border-gray-200 border-b-0 p-3 shadow-sm transition-all overflow-y-auto
@@ -350,7 +446,7 @@ export default function App() {
                         )}
                       </div>
 
-                      {/* Footer do Card - Botão Concluída */}
+                      {/* Footer */}
                       <div className="bg-white p-3 rounded-b-xl border border-gray-200 border-t-0 shadow-sm flex justify-end">
                         <button
                           onClick={() => setSiteToComplete(site)}
@@ -373,7 +469,7 @@ export default function App() {
       {/* Modal Nova Obra */}
       {showModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4 transition-opacity">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-md overflow-hidden transform transition-all">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md overflow-hidden animate-fade-in">
             <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
               <h3 className="font-bold text-gray-800">Nova Obra</h3>
               <button onClick={() => setShowModal(false)} className="text-gray-400 hover:text-gray-600">
@@ -389,7 +485,6 @@ export default function App() {
                   value={newSiteData.name}
                   onChange={e => setNewSiteData({...newSiteData, name: e.target.value})}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                  placeholder="Ex: Edifício Solar"
                 />
               </div>
               <div>
@@ -400,7 +495,6 @@ export default function App() {
                   value={newSiteData.address}
                   onChange={e => setNewSiteData({...newSiteData, address: e.target.value})}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                  placeholder="Ex: Rua das Palmeiras, 123"
                 />
               </div>
               
@@ -440,19 +534,8 @@ export default function App() {
                 </select>
               </div>
               <div className="flex gap-3 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setShowModal(false)}
-                  className="flex-1 px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  className="flex-1 px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors shadow-sm"
-                >
-                  Criar Obra
-                </button>
+                <button type="button" onClick={() => setShowModal(false)} className="flex-1 px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors">Cancelar</button>
+                <button type="submit" className="flex-1 px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors shadow-sm">Criar Obra</button>
               </div>
             </form>
           </div>
@@ -475,18 +558,8 @@ export default function App() {
               </span>
             </p>
             <div className="flex gap-3 justify-center">
-              <button
-                onClick={() => setSiteToComplete(null)}
-                className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
-              >
-                Cancelar
-              </button>
-              <button
-                onClick={handleCompleteSite}
-                className="px-4 py-2 text-sm font-medium text-white bg-green-600 hover:bg-green-700 rounded-lg transition-colors shadow-sm"
-              >
-                Sim, concluir
-              </button>
+              <button onClick={() => setSiteToComplete(null)} className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors">Cancelar</button>
+              <button onClick={handleCompleteSite} className="px-4 py-2 text-sm font-medium text-white bg-green-600 hover:bg-green-700 rounded-lg transition-colors shadow-sm">Sim, concluir</button>
             </div>
           </div>
         </div>
