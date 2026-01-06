@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Users, HardHat, MapPin, Search, Briefcase, Plus, Hammer, Zap, PenTool, X, ShieldAlert, Calendar, CheckCircle, AlertTriangle, Loader2, Edit2 } from 'lucide-react';
+import { Users, HardHat, MapPin, Search, Briefcase, Plus, Hammer, Zap, PenTool, X, ShieldAlert, Calendar, CheckCircle, AlertTriangle, Loader2, Edit2, Trash2, Lock } from 'lucide-react';
 import { initializeApp } from 'firebase/app';
 import { 
   getFirestore, collection, onSnapshot, addDoc, updateDoc, 
@@ -18,6 +18,12 @@ const firebaseConfig = {
   messagingSenderId: "942526225092",
   appId: "1:942526225092:web:8ec0d6aa03edca8bb04791"
 };
+
+// ==================================================================================
+// CONFIGURAÇÃO DE SEGURANÇA
+// Defina a senha de administrador aqui
+// ==================================================================================
+const ADMIN_PASSWORD = "4858";
 
 // Inicialização com tratamento de erro básico
 let app, auth, db;
@@ -74,6 +80,18 @@ const STATUS_PRIORITY = {
   "Em andamento": 2
 };
 
+// Helper para escolher cor baseada na função
+const getRoleColor = (role) => {
+  const r = role.toLowerCase();
+  if (r.includes("ajudante")) return "bg-gray-100 text-gray-800";
+  if (r.includes("senior")) return "bg-orange-100 text-orange-800";
+  if (r.includes("pleno")) return "bg-blue-100 text-blue-800";
+  if (r.includes("junior")) return "bg-cyan-100 text-cyan-800";
+  if (r.includes("segurança")) return "bg-yellow-100 text-yellow-800";
+  if (r.includes("supervisor")) return "bg-purple-100 text-purple-800";
+  return "bg-gray-100 text-gray-800";
+};
+
 export default function App() {
   const [user, setUser] = useState(null);
   const [workers, setWorkers] = useState([]);
@@ -85,14 +103,15 @@ export default function App() {
   const [draggedWorkerId, setDraggedWorkerId] = useState(null);
   const [isDraggingOver, setIsDraggingOver] = useState(null);
   
-  // Controle do Modal de Edição/Criação
+  // Controle do Modal de Edição/Criação de OBRA
   const [showModal, setShowModal] = useState(false);
-  const [editingSiteId, setEditingSiteId] = useState(null); // ID da obra sendo editada (null se for criação)
+  const [editingSiteId, setEditingSiteId] = useState(null); 
   const [siteToComplete, setSiteToComplete] = useState(null);
-  
-  const [siteFormData, setSiteFormData] = useState({ 
-    name: '', address: '', status: 'Em andamento', startDate: '', endDate: '' 
-  });
+  const [siteFormData, setSiteFormData] = useState({ name: '', address: '', status: 'Em andamento', startDate: '', endDate: '' });
+
+  // Controle do Modal de Edição/Criação de FUNCIONÁRIO
+  const [showWorkerModal, setShowWorkerModal] = useState(false);
+  const [workerFormData, setWorkerFormData] = useState({ id: null, name: '', role: 'Ajudante Montador' });
 
   // 1. Autenticação
   useEffect(() => {
@@ -150,18 +169,12 @@ export default function App() {
     const unsubSites = onSnapshot(query(sitesRef, orderBy('name')), 
       (snapshot) => {
         const sitesList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        
-        // Ordenação personalizada no cliente
         sitesList.sort((a, b) => {
-          const priorityA = STATUS_PRIORITY[a.status] ?? 99; // 99 joga pro fim se o status não existir
+          const priorityA = STATUS_PRIORITY[a.status] ?? 99;
           const priorityB = STATUS_PRIORITY[b.status] ?? 99;
-          
-          if (priorityA !== priorityB) {
-            return priorityA - priorityB; // Ordena por status
-          }
-          return a.name.localeCompare(b.name); // Desempate alfabético
+          if (priorityA !== priorityB) return priorityA - priorityB;
+          return a.name.localeCompare(b.name);
         });
-
         setSites(sitesList);
       },
       (err) => console.error("Erro Sites:", err)
@@ -169,6 +182,73 @@ export default function App() {
 
     return () => { unsubWorkers(); unsubSites(); };
   }, [user]);
+
+  // --- Validação de Senha ---
+  const checkAdminPassword = (action) => {
+    const pwd = window.prompt(`Digite a senha de administrador para ${action}:`);
+    if (pwd === ADMIN_PASSWORD) return true;
+    if (pwd !== null) alert("Senha incorreta! Ação cancelada.");
+    return false;
+  };
+
+  // --- Funções de WORKER (Colaborador) ---
+
+  const openNewWorkerModal = () => {
+    setWorkerFormData({ id: null, name: '', role: 'Ajudante Montador' });
+    setShowWorkerModal(true);
+  };
+
+  const openEditWorkerModal = (worker) => {
+    setWorkerFormData({ id: worker.id, name: worker.name, role: worker.role });
+    setShowWorkerModal(true);
+  };
+
+  const handleSaveWorker = async (e) => {
+    e.preventDefault();
+    if (!workerFormData.name || !user) return;
+
+    // SOLICITAR SENHA
+    if (!checkAdminPassword("salvar as alterações")) return;
+
+    try {
+      if (workerFormData.id) {
+        // Editar
+        const workerRef = doc(db, WORKERS_COLLECTION, workerFormData.id);
+        await updateDoc(workerRef, {
+          name: workerFormData.name,
+          role: workerFormData.role,
+          color: getRoleColor(workerFormData.role) // Atualiza cor se mudar função
+        });
+      } else {
+        // Novo
+        await addDoc(collection(db, WORKERS_COLLECTION), {
+          name: workerFormData.name,
+          role: workerFormData.role,
+          color: getRoleColor(workerFormData.role),
+          siteId: null
+        });
+      }
+      setShowWorkerModal(false);
+    } catch (error) {
+      console.error("Erro ao salvar colaborador:", error);
+    }
+  };
+
+  const handleDeleteWorker = async () => {
+    if (!workerFormData.id || !user) return;
+    
+    // SOLICITAR SENHA
+    if (window.confirm(`Tem certeza que deseja excluir ${workerFormData.name}?`)) {
+      if (!checkAdminPassword("excluir este colaborador")) return;
+
+      try {
+        await deleteDoc(doc(db, WORKERS_COLLECTION, workerFormData.id));
+        setShowWorkerModal(false);
+      } catch (error) {
+        console.error("Erro ao excluir colaborador:", error);
+      }
+    }
+  };
 
   // --- Funções de UI ---
 
@@ -190,14 +270,12 @@ export default function App() {
     }
   };
 
-  // Abrir Modal de CRIAÇÃO
   const openNewSiteModal = () => {
     setEditingSiteId(null);
     setSiteFormData({ name: '', address: '', status: 'Em andamento', startDate: '', endDate: '' });
     setShowModal(true);
   };
 
-  // Abrir Modal de EDIÇÃO
   const openEditSiteModal = (site) => {
     setEditingSiteId(site.id);
     setSiteFormData({ 
@@ -210,14 +288,11 @@ export default function App() {
     setShowModal(true);
   };
 
-  // Salvar Obra (Criação ou Edição)
   const handleSaveSite = async (e) => {
     e.preventDefault();
     if (!siteFormData.name || !user) return;
-    
     try {
       if (editingSiteId) {
-        // Modo Edição: Atualizar existente
         const siteRef = doc(db, SITES_COLLECTION, editingSiteId);
         await updateDoc(siteRef, {
           name: siteFormData.name,
@@ -227,7 +302,6 @@ export default function App() {
           endDate: siteFormData.endDate
         });
       } else {
-        // Modo Criação: Adicionar novo
         await addDoc(collection(db, SITES_COLLECTION), {
           ...siteFormData,
           createdAt: new Date().toISOString()
@@ -263,9 +337,28 @@ export default function App() {
   const WorkerCard = ({ worker }) => {
     const isDragging = draggedWorkerId === worker.id;
     return (
-      <div draggable onDragStart={(e) => handleDragStart(e, worker.id)} className={`flex items-center gap-3 p-3 mb-2 bg-white rounded-lg shadow-sm border border-gray-200 cursor-grab active:cursor-grabbing hover:shadow-md transition-all select-none ${isDragging ? 'opacity-50 ring-2 ring-blue-400' : ''}`}>
-        <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs flex-shrink-0 ${worker.color || 'bg-gray-100 text-gray-800'}`}>{worker.name.charAt(0)}</div>
-        <div className="flex-1 min-w-0"><p className="text-sm font-semibold text-gray-800 truncate">{worker.name}</p><div className="flex items-center gap-1 text-xs text-gray-500"><span className="truncate">{worker.role}</span></div></div>
+      <div 
+        draggable 
+        onDragStart={(e) => handleDragStart(e, worker.id)} 
+        className={`flex items-center gap-3 p-3 mb-2 bg-white rounded-lg shadow-sm border border-gray-200 cursor-grab active:cursor-grabbing hover:shadow-md transition-all select-none group relative ${isDragging ? 'opacity-50 ring-2 ring-blue-400' : ''}`}
+      >
+        <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs flex-shrink-0 ${worker.color || 'bg-gray-100 text-gray-800'}`}>
+          {worker.name.charAt(0)}
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-semibold text-gray-800 truncate pr-6">{worker.name}</p>
+          <div className="flex items-center gap-1 text-xs text-gray-500">
+            <span className="truncate">{worker.role}</span>
+          </div>
+        </div>
+        {/* Botão de Editar Funcionário com ícone de cadeado indicando restrição */}
+        <button 
+          onClick={(e) => { e.stopPropagation(); openEditWorkerModal(worker); }}
+          className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-full opacity-0 group-hover:opacity-100 transition-all flex items-center gap-1"
+          title="Editar funcionário (Requer senha)"
+        >
+          <Edit2 size={14} />
+        </button>
       </div>
     );
   };
@@ -278,10 +371,7 @@ export default function App() {
             <>
               <AlertTriangle className="w-12 h-12 text-red-500 mx-auto mb-3" />
               <h3 className="text-lg font-bold text-gray-800 mb-2">Erro de Conexão</h3>
-              <div className="bg-red-50 border border-red-200 text-red-700 p-3 rounded-lg text-sm text-left">
-                {errorMsg}
-              </div>
-              <p className="text-xs text-gray-400 mt-4">Verifique o console do navegador (F12) para mais detalhes.</p>
+              <div className="bg-red-50 border border-red-200 text-red-700 p-3 rounded-lg text-sm text-left">{errorMsg}</div>
             </>
           ) : (
             <>
@@ -322,7 +412,12 @@ export default function App() {
           <div className="flex flex-col w-full md:w-64 flex-shrink-0 max-h-[calc(100vh-140px)]">
             <div className="flex items-center justify-between mb-3 px-1">
               <h2 className="font-bold text-gray-700 flex items-center gap-2"><Users size={18} className="text-blue-500" /> Equipe Disponível</h2>
-              <span className="bg-blue-100 text-blue-700 text-xs font-bold px-2 py-1 rounded-full">{unassignedWorkers.length}</span>
+              <div className="flex items-center gap-2">
+                <span className="bg-blue-100 text-blue-700 text-xs font-bold px-2 py-1 rounded-full">{unassignedWorkers.length}</span>
+                <button onClick={openNewWorkerModal} className="p-1 text-blue-600 hover:bg-blue-50 rounded-md transition-colors" title="Novo Colaborador (Requer senha)">
+                  <Plus size={16} />
+                </button>
+              </div>
             </div>
             <div onDragOver={(e) => handleDragOver(e, 'unassigned')} onDrop={(e) => handleDrop(e, null)} className={`flex-1 bg-gray-100 rounded-xl p-3 border-2 border-dashed transition-colors overflow-y-auto ${isDraggingOver === 'unassigned' ? 'border-blue-400 bg-blue-50' : 'border-gray-300'}`}>
               {unassignedWorkers.length === 0 ? <div className="h-full flex flex-col items-center justify-center text-gray-400 p-4 text-center"><Briefcase size={32} className="mb-2 opacity-50" /><p className="text-sm">Ninguém disponível.</p></div> : unassignedWorkers.map(w => <WorkerCard key={w.id} worker={w} />)}
@@ -346,11 +441,7 @@ export default function App() {
                       <div className="bg-white p-4 rounded-t-xl border border-gray-200 border-b-0 shadow-sm relative overflow-hidden">
                         <div className={`absolute top-0 left-0 w-1 h-full ${getStatusBarColor(site.status)}`}></div>
                         <div className="flex justify-between items-start mb-1 pl-2 gap-2">
-                            <h3 
-                              onClick={() => openEditSiteModal(site)}
-                              className="font-bold text-gray-800 text-lg truncate cursor-pointer hover:text-blue-600 hover:underline flex items-center gap-2 group transition-colors flex-1 min-w-0"
-                              title="Clique para editar informações da obra"
-                            >
+                            <h3 onClick={() => openEditSiteModal(site)} className="font-bold text-gray-800 text-lg truncate cursor-pointer hover:text-blue-600 hover:underline flex items-center gap-2 group transition-colors flex-1 min-w-0" title="Editar obra">
                               {site.name}
                               <Edit2 size={12} className="text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0" />
                             </h3>
@@ -375,6 +466,7 @@ export default function App() {
         </div>
       </main>
 
+      {/* Modal de Obras */}
       {showModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4 transition-opacity">
           <div className="bg-white rounded-xl shadow-xl w-full max-w-md overflow-hidden animate-fade-in">
@@ -398,6 +490,45 @@ export default function App() {
               <div className="flex gap-3 pt-2">
                 <button type="button" onClick={() => setShowModal(false)} className="flex-1 px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors">Cancelar</button>
                 <button type="submit" className="flex-1 px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors shadow-sm">{editingSiteId ? "Salvar Alterações" : "Criar Obra"}</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Colaboradores */}
+      {showWorkerModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4 transition-opacity">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-sm overflow-hidden animate-fade-in">
+            <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
+              <h3 className="font-bold text-gray-800">{workerFormData.id ? "Editar Colaborador" : "Novo Colaborador"}</h3>
+              <button onClick={() => setShowWorkerModal(false)} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
+            </div>
+            <form onSubmit={handleSaveWorker} className="p-6 space-y-4">
+              <div className="flex items-center gap-2 p-2 bg-yellow-50 text-yellow-800 text-xs rounded border border-yellow-200 mb-2">
+                <Lock size={14} />
+                <span>Esta ação requer senha de administrador.</span>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Nome Completo</label>
+                <input type="text" required value={workerFormData.name} onChange={e => setWorkerFormData({...workerFormData, name: e.target.value})} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Função</label>
+                <select value={workerFormData.role} onChange={e => setWorkerFormData({...workerFormData, role: e.target.value})} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none">
+                   {ROLES.filter(r => r !== "Todos").map(r => <option key={r} value={r}>{r}</option>)}
+                </select>
+              </div>
+              <div className="flex gap-3 pt-2 items-center">
+                {workerFormData.id && (
+                  <button type="button" onClick={handleDeleteWorker} className="px-3 py-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors border border-transparent hover:border-red-100" title="Excluir (Requer Senha)">
+                    <Trash2 size={18} />
+                  </button>
+                )}
+                <div className="flex-1 flex gap-3">
+                  <button type="button" onClick={() => setShowWorkerModal(false)} className="flex-1 px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors">Cancelar</button>
+                  <button type="submit" className="flex-1 px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors shadow-sm">Salvar</button>
+                </div>
               </div>
             </form>
           </div>
