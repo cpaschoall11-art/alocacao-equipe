@@ -21,11 +21,10 @@ const firebaseConfig = {
 
 // ==================================================================================
 // CONFIGURAÇÃO DE SEGURANÇA
-// Defina a senha de administrador aqui
 // ==================================================================================
 const ADMIN_PASSWORD = "4858";
 
-// Inicialização com tratamento de erro básico
+// Inicialização com tratamento de erro
 let app, auth, db;
 try {
   app = initializeApp(firebaseConfig);
@@ -39,6 +38,7 @@ try {
 const WORKERS_COLLECTION = 'workers';
 const SITES_COLLECTION = 'sites';
 
+// Sementes iniciais (apenas para DB vazio)
 const INITIAL_WORKERS_SEED = [
   { name: "Adauto Florencio de Araujo", role: "Montador Pleno", color: "bg-blue-100 text-blue-800", siteId: null },
   { name: "Ailton dos Reis de Jesus", role: "Soldador Senior", color: "bg-orange-100 text-orange-800", siteId: null },
@@ -73,14 +73,14 @@ const ROLES = [
 
 const STATUS_OPTIONS = ["Em planejamento", "Em andamento", "Paralisada"];
 
-// Definindo a prioridade de ordenação (Menor número = aparece primeiro)
+// Prioridade de ordenação
 const STATUS_PRIORITY = {
   "Em planejamento": 0,
   "Paralisada": 1,
   "Em andamento": 2
 };
 
-// Helper para escolher cor baseada na função
+// Helper de cor
 const getRoleColor = (role) => {
   const r = role.toLowerCase();
   if (r.includes("ajudante")) return "bg-gray-100 text-gray-800";
@@ -103,15 +103,20 @@ export default function App() {
   const [draggedWorkerId, setDraggedWorkerId] = useState(null);
   const [isDraggingOver, setIsDraggingOver] = useState(null);
   
-  // Controle do Modal de Edição/Criação de OBRA
+  // Modais
   const [showModal, setShowModal] = useState(false);
+  const [showWorkerModal, setShowWorkerModal] = useState(false);
+  const [showPasswordModal, setShowPasswordModal] = useState(false);
+  
+  // Dados de Edição
   const [editingSiteId, setEditingSiteId] = useState(null); 
   const [siteToComplete, setSiteToComplete] = useState(null);
   const [siteFormData, setSiteFormData] = useState({ name: '', address: '', status: 'Em andamento', startDate: '', endDate: '' });
-
-  // Controle do Modal de Edição/Criação de FUNCIONÁRIO
-  const [showWorkerModal, setShowWorkerModal] = useState(false);
   const [workerFormData, setWorkerFormData] = useState({ id: null, name: '', role: 'Ajudante Montador' });
+  
+  // Estado para controle da senha
+  const [passwordInput, setPasswordInput] = useState("");
+  const [pendingAction, setPendingAction] = useState(null); // Guarda a função a ser executada após a senha
 
   // 1. Autenticação
   useEffect(() => {
@@ -121,17 +126,18 @@ export default function App() {
       return;
     }
 
-    signInAnonymously(auth)
-      .then(() => console.log("Autenticado como anônimo"))
-      .catch((err) => {
-        console.error("Erro Auth:", err);
-        setErrorMsg(`Erro de Autenticação: ${err.message}. Verifique se ativou 'Anonymous' no console do Firebase.`);
-        setLoading(false);
-      });
-
-    return onAuthStateChanged(auth, (u) => {
-      if (u) setUser(u);
+    const unsubscribe = onAuthStateChanged(auth, (u) => {
+      if (u) {
+        setUser(u);
+      } else {
+        signInAnonymously(auth).catch((err) => {
+          console.error("Erro Auth:", err);
+          setErrorMsg(`Erro de Autenticação: ${err.message}`);
+          setLoading(false);
+        });
+      }
     });
+    return unsubscribe;
   }, []);
 
   // 2. Sincronização
@@ -156,16 +162,12 @@ export default function App() {
       }, 
       (err) => {
         console.error("Erro Workers:", err);
-        if (err.code === 'permission-denied') {
-          setErrorMsg("Permissão Negada: Verifique se as 'Regras' do Firestore estão em modo de teste (allow read, write: if true;).");
-        } else {
-          setErrorMsg(`Erro de Conexão: ${err.message}`);
-        }
+        setErrorMsg(`Erro de Conexão: ${err.message}`);
         setLoading(false);
       }
     );
 
-    // Carregar Obras com Ordenação Personalizada
+    // Carregar Obras
     const unsubSites = onSnapshot(query(sitesRef, orderBy('name')), 
       (snapshot) => {
         const sitesList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
@@ -183,12 +185,24 @@ export default function App() {
     return () => { unsubWorkers(); unsubSites(); };
   }, [user]);
 
-  // --- Validação de Senha ---
-  const checkAdminPassword = (action) => {
-    const pwd = window.prompt(`Digite a senha de administrador para ${action}:`);
-    if (pwd === ADMIN_PASSWORD) return true;
-    if (pwd !== null) alert("Senha incorreta! Ação cancelada.");
-    return false;
+  // --- Sistema de Senha e Ações Protegidas ---
+
+  const initiateProtectedAction = (action) => {
+    setPendingAction(() => action); // Armazena a função para executar depois
+    setPasswordInput("");
+    setShowPasswordModal(true);
+  };
+
+  const handlePasswordSubmit = (e) => {
+    e.preventDefault();
+    if (passwordInput === ADMIN_PASSWORD) {
+      if (pendingAction) pendingAction();
+      setShowPasswordModal(false);
+      setPendingAction(null);
+    } else {
+      alert("Senha incorreta!");
+      setPasswordInput("");
+    }
   };
 
   // --- Funções de WORKER (Colaborador) ---
@@ -203,54 +217,59 @@ export default function App() {
     setShowWorkerModal(true);
   };
 
-  const handleSaveWorker = async (e) => {
+  const handleSaveWorker = (e) => {
     e.preventDefault();
-    if (!workerFormData.name || !user) return;
+    if (!workerFormData.name) return;
+    if (!user) { alert("Erro: Não conectado ao banco de dados."); return; }
 
-    // SOLICITAR SENHA
-    if (!checkAdminPassword("salvar as alterações")) return;
-
-    try {
-      if (workerFormData.id) {
-        // Editar
-        const workerRef = doc(db, WORKERS_COLLECTION, workerFormData.id);
-        await updateDoc(workerRef, {
-          name: workerFormData.name,
-          role: workerFormData.role,
-          color: getRoleColor(workerFormData.role) // Atualiza cor se mudar função
-        });
-      } else {
-        // Novo
-        await addDoc(collection(db, WORKERS_COLLECTION), {
-          name: workerFormData.name,
-          role: workerFormData.role,
-          color: getRoleColor(workerFormData.role),
-          siteId: null
-        });
+    // Define a ação de salvar
+    const action = async () => {
+      try {
+        if (workerFormData.id) {
+          const workerRef = doc(db, WORKERS_COLLECTION, workerFormData.id);
+          await updateDoc(workerRef, {
+            name: workerFormData.name,
+            role: workerFormData.role,
+            color: getRoleColor(workerFormData.role)
+          });
+        } else {
+          await addDoc(collection(db, WORKERS_COLLECTION), {
+            name: workerFormData.name,
+            role: workerFormData.role,
+            color: getRoleColor(workerFormData.role),
+            siteId: null
+          });
+        }
+        setShowWorkerModal(false);
+      } catch (error) {
+        console.error("Erro ao salvar:", error);
+        alert("Erro ao salvar. Tente novamente.");
       }
-      setShowWorkerModal(false);
-    } catch (error) {
-      console.error("Erro ao salvar colaborador:", error);
-    }
+    };
+
+    // Chama o modal de senha
+    initiateProtectedAction(action);
   };
 
-  const handleDeleteWorker = async () => {
+  const handleDeleteWorker = () => {
     if (!workerFormData.id || !user) return;
     
-    // SOLICITAR SENHA
-    if (window.confirm(`Tem certeza que deseja excluir ${workerFormData.name}?`)) {
-      if (!checkAdminPassword("excluir este colaborador")) return;
-
+    const action = async () => {
       try {
         await deleteDoc(doc(db, WORKERS_COLLECTION, workerFormData.id));
         setShowWorkerModal(false);
       } catch (error) {
-        console.error("Erro ao excluir colaborador:", error);
+        console.error("Erro ao excluir:", error);
+        alert("Erro ao excluir.");
       }
+    };
+
+    if (window.confirm(`Tem certeza que deseja excluir ${workerFormData.name}?`)) {
+      initiateProtectedAction(action);
     }
   };
 
-  // --- Funções de UI ---
+  // --- Funções de UI (Arrastar, Obras, etc) ---
 
   const handleDragStart = (e, workerId) => {
     setDraggedWorkerId(workerId);
@@ -351,11 +370,10 @@ export default function App() {
             <span className="truncate">{worker.role}</span>
           </div>
         </div>
-        {/* Botão de Editar Funcionário com ícone de cadeado indicando restrição */}
         <button 
           onClick={(e) => { e.stopPropagation(); openEditWorkerModal(worker); }}
           className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-full opacity-0 group-hover:opacity-100 transition-all flex items-center gap-1"
-          title="Editar funcionário (Requer senha)"
+          title="Editar funcionário"
         >
           <Edit2 size={14} />
         </button>
@@ -414,7 +432,7 @@ export default function App() {
               <h2 className="font-bold text-gray-700 flex items-center gap-2"><Users size={18} className="text-blue-500" /> Equipe Disponível</h2>
               <div className="flex items-center gap-2">
                 <span className="bg-blue-100 text-blue-700 text-xs font-bold px-2 py-1 rounded-full">{unassignedWorkers.length}</span>
-                <button onClick={openNewWorkerModal} className="p-1 text-blue-600 hover:bg-blue-50 rounded-md transition-colors" title="Novo Colaborador (Requer senha)">
+                <button onClick={openNewWorkerModal} className="p-1 text-blue-600 hover:bg-blue-50 rounded-md transition-colors" title="Novo Colaborador">
                   <Plus size={16} />
                 </button>
               </div>
@@ -529,6 +547,46 @@ export default function App() {
                   <button type="button" onClick={() => setShowWorkerModal(false)} className="flex-1 px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors">Cancelar</button>
                   <button type="submit" className="flex-1 px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors shadow-sm">Salvar</button>
                 </div>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* NOVO: Modal de Senha Personalizado */}
+      {showPasswordModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-[60] p-4 animate-fade-in backdrop-blur-sm">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-xs overflow-hidden">
+            <div className="px-6 py-4 bg-gray-50 border-b border-gray-100 flex flex-col items-center">
+              <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center mb-2">
+                <Lock size={20} className="text-blue-600" />
+              </div>
+              <h3 className="font-bold text-gray-800 text-center">Senha Necessária</h3>
+              <p className="text-xs text-gray-500 text-center mt-1">Acesso restrito a administradores</p>
+            </div>
+            <form onSubmit={handlePasswordSubmit} className="p-6">
+              <input
+                type="password"
+                autoFocus
+                placeholder="Senha numérica"
+                value={passwordInput}
+                onChange={(e) => setPasswordInput(e.target.value)}
+                className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none text-center text-lg tracking-widest mb-4"
+              />
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => { setShowPasswordModal(false); setPasswordInput(""); setPendingAction(null); }}
+                  className="flex-1 px-3 py-2 text-sm font-medium text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 px-3 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors shadow-sm"
+                >
+                  Confirmar
+                </button>
               </div>
             </form>
           </div>
